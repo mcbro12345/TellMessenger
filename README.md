@@ -11,7 +11,7 @@
 - An emoticon picker shows text faces and symbols the game's font can display.
 
 ### Contact list
-- Online status dots, job icons, last-message previews
+- Online status dots for friends, job icons, last-message previews
 - Pin contacts and reorder pinned ones. Search across names, nicknames, notes and message history.
 - Right-click a contact to **mute** them, set a **nickname**, and add a private **note**.
 
