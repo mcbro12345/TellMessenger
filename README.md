@@ -2,6 +2,10 @@
 
 **Never lose a tell again.** A Dalamud plugin for FFXIV that puts every tell in one messenger window, with history, online status and unread badges. It's a port of the World of Warcraft addon [WhisperMessenger](https://github.com/F0rty-Tw0/WhisperMessenger), adapted to how FFXIV works.
 
+<img width="371" height="65" alt="{156F8AED-7E6E-47A6-82D5-765587C71D79}" src="https://github.com/user-attachments/assets/0c267592-0740-456d-b737-e824af4261e7" />
+<img width="740" height="585" alt="{EA421B2F-9237-45C5-8F89-8D2EBA25B2C4}" src="https://github.com/user-attachments/assets/98c17c74-d99e-4783-a871-128ff57ef61b" />
+
+
 ## Features
 
 ### Messenger-style conversations
