@@ -147,7 +147,7 @@ public sealed class SettingsWindow : Window
 
         Section("Avatars");
         Toggle("Use Lodestone portraits", config.UseLodestonePortraits, v => config.UseLodestonePortraits = v,
-            "Shows each person's Lodestone face picture, in their current gear and headwear, including yours. Looked up by name and home world on the Lodestone once per session and kept in memory only; nothing is saved to disk. Job icons show until a picture arrives or if someone has none.");
+            "Shows each person's Lodestone face picture, in their current gear and headwear, including yours. Pictures are kept in memory only. Only where each picture is online gets saved, so they load right away next time; everyone from your history starts loading when the plugin does, and each is re-checked on the Lodestone once per session in case their look changed. Job icons show until a picture arrives or if someone has none.");
         using (ImRaii.Disabled(!config.UseLodestonePortraits))
         {
             if (ImGui.Button("Refresh portraits"))

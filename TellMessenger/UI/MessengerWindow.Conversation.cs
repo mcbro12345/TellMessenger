@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility.Raii;
 using TellMessenger.Game;
@@ -186,6 +187,14 @@ public sealed partial class MessengerWindow
         var name = messenger.DisplayName(conversation);
         Gfx.Text(list, new Vector2(x, y), Theme.U32(p.TextEmphasis), name);
         var nameWidth = ImGui.CalcTextSize(name).X;
+        // Right-click the picture or name for the menu.
+        if (ImGui.IsWindowHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Right)
+            && ImGui.IsMouseHoveringRect(avatarMin, new Vector2(x + nameWidth, avatarMin.Y + avatarSize)))
+        {
+            menuContactKey = conversation.Key;
+            GatherPluginItemsFor(conversation);
+            ImGui.OpenPopup("##headerMenu");
+        }
         var tagX = x + nameWidth + Gfx.S(8);
         var prefs = messenger.PrefsFor(conversation);
         if (prefs?.Nickname != null)
@@ -228,8 +237,10 @@ public sealed partial class MessengerWindow
             };
             line3 = $"as {conversation.Owner.Split('@')[0]}";
         }
-        if (Messenger.IsTest(conversation))
-            line3 = "Test contact  ·  can't be replied to";
+        if (conversation.IsSelf)
+            line3 = "Notes to yourself  ·  only you can see these";
+        else if (Messenger.IsTest(conversation))
+            line3 = "Test contact  ·  messages you send stay here";
         else if (!messenger.CanSend(conversation))
             line3 = $"via {conversation.Owner.Split('@')[0]}  ·  read-only";
 
@@ -260,6 +271,7 @@ public sealed partial class MessengerWindow
         if (Gfx.IconButton("##more", FontAwesomeIcon.EllipsisV, "More"))
         {
             menuContactKey = conversation.Key;
+            GatherPluginItemsFor(conversation);
             ImGui.OpenPopup("##headerMenu");
         }
         using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, Gfx.S(8, 8)).Push(ImGuiStyleVar.ItemSpacing, Gfx.S(8, 4)))
@@ -363,6 +375,17 @@ public sealed partial class MessengerWindow
     }
 
     // A player name link in a message: open a conversation with them.
+    // Right-clicking who wrote a message (their name or picture).
+    private void PlayerMenuOnRightClick(Conversation conversation, ChatMessage message, Vector2 min, Vector2 max)
+    {
+        if (!ImGui.IsWindowHovered() || !ImGui.IsMouseClicked(ImGuiMouseButton.Right) || !ImGui.IsMouseHoveringRect(min, max))
+            return;
+        if (conversation.IsTell)
+            OpenPlayerMenu(conversation.Name, conversation.World);
+        else
+            OpenPlayerMenu(message.Sender, message.SenderWorld);
+    }
+
     private void OpenTellFromLink(string name, string world)
     {
         if (messenger.Owner == null)
@@ -422,6 +445,7 @@ public sealed partial class MessengerWindow
                 var sender = conversation.IsTell ? messenger.DisplayName(conversation) : message.Sender;
                 var nameSize = Gfx.SmallSize(sender);
                 Gfx.SmallText(list, new Vector2(start.X + gutter, start.Y), Theme.U32(p.TextSecondary), sender);
+                PlayerMenuOnRightClick(conversation, message, new Vector2(start.X + gutter, start.Y), new Vector2(start.X + gutter + nameSize.X, start.Y + nameSize.Y));
                 Gfx.SmallText(list, new Vector2(start.X + gutter + nameSize.X + Gfx.S(8), start.Y), Theme.U32(p.Timestamp), time);
             }
             ImGui.Dummy(new Vector2(region, small + Gfx.S(3)));
@@ -454,11 +478,7 @@ public sealed partial class MessengerWindow
         ImGui.InvisibleButton("##bubble", bubbleSize);
         var hovered = ImGui.IsItemHovered();
         var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
-        if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
-        {
-            menuMessage = message;
-            openMessageMenu = true;
-        }
+        var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
 
         var background = message.Outgoing ? Theme.BubbleOut : Theme.BubbleIn;
         if (message.State == SendState.Pending)
@@ -499,6 +519,23 @@ public sealed partial class MessengerWindow
             if (leftClicked)
                 MessageLinks.Activate(hoveredLink, OpenTellFromLink);
         }
+        // Right-click: a player link gets the player menu, anything else the message menu.
+        if (rightClicked)
+        {
+            if (hoveredLink?.Head is PlayerPayload { World.IsValid: true } player)
+            {
+                OpenPlayerMenu(player.PlayerName, player.World.Value.Name.ExtractText());
+            }
+            else if (hoveredLink?.Head is ItemPayload item)
+            {
+                OpenItemMenu(item);
+            }
+            else
+            {
+                menuMessage = message;
+                openMessageMenu = true;
+            }
+        }
 
         // Avatar beside the first bubble of a run.
         if (startsGroup)
@@ -508,6 +545,8 @@ public sealed partial class MessengerWindow
                 : new Vector2(rowStart.X, bubbleMin.Y);
             var job = message.Outgoing ? messenger.LocalJob : conversation.IsTell ? messenger.JobOf(conversation) : message.SenderJob;
             Gfx.Avatar(list, avatarMin, avatarSize, job, ChannelKind.Tell, messenger.PortraitOf(conversation, message));
+            if (!message.Outgoing)
+                PlayerMenuOnRightClick(conversation, message, avatarMin, avatarMin + new Vector2(avatarSize, avatarSize));
         }
 
         ImGui.SetCursorScreenPos(new Vector2(rowStart.X, bubbleMax.Y));

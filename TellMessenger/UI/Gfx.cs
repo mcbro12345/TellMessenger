@@ -61,7 +61,7 @@ public static class Gfx
 
     // Round avatar: the job icon when known, otherwise a glyph for the
     // channel or a generic person.
-    public static void Avatar(ImDrawListPtr list, Vector2 min, float size, byte job, ChannelKind kind, LodestonePortraits.Face? portrait = null)
+    public static void Avatar(ImDrawListPtr list, Vector2 min, float size, byte job, ChannelKind kind, LodestonePortraits.Face? portrait = null, float alpha = 1f)
     {
         var max = min + new Vector2(size, size);
         var center = min + new Vector2(size / 2, size / 2);
@@ -74,7 +74,7 @@ public static class Gfx
             var face = portrait.At(pixels);
             if (face != null)
             {
-                list.AddImageRounded(face.Handle, pixelMin, pixelMin + new Vector2(pixels, pixels), Vector2.Zero, Vector2.One, 0xFFFFFFFF, size * 0.18f);
+                list.AddImageRounded(face.Handle, pixelMin, pixelMin + new Vector2(pixels, pixels), Vector2.Zero, Vector2.One, Tint(alpha), size * 0.18f);
                 return;
             }
         }
@@ -84,14 +84,16 @@ public static class Gfx
             if (wrap != null)
             {
                 // The whole framed job icon, uncropped.
-                list.AddImage(wrap.Handle, Round(min), Round(max));
+                list.AddImage(wrap.Handle, Round(min), Round(max), Vector2.Zero, Vector2.One, Tint(alpha));
                 return;
             }
         }
 
-        list.AddCircleFilled(center, size / 2, Theme.U32(Theme.Current.Input));
-        Icon(list, KindIcon(kind), center, Theme.Current.TextSoft);
+        list.AddCircleFilled(center, size / 2, Theme.U32(Theme.Fade(Theme.Current.Input, alpha)));
+        Icon(list, KindIcon(kind), center, Theme.Fade(Theme.Current.TextSoft, alpha));
     }
+
+    private static uint Tint(float alpha) => ((uint)(Math.Clamp(alpha, 0f, 1f) * 255) << 24) | 0x00FFFFFF;
 
     public static FontAwesomeIcon KindIcon(ChannelKind kind) => kind switch
     {

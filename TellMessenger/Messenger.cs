@@ -51,7 +51,15 @@ public sealed class Messenger : IDisposable
     {
         Config = config;
         Store = new HistoryStore(config, Services.PluginInterface.GetPluginConfigDirectory());
-        Portraits = new LodestonePortraits(config, Services.PluginInterface.GetPluginConfigDirectory());
+        Portraits = new LodestonePortraits(config, Store, Services.PluginInterface.GetPluginConfigDirectory());
+        // Everyone from last time: your characters, then tell contacts by
+        // recency, then linkshell members who've talked.
+        var owners = Store.Conversations.Select(c => c.Owner).Distinct();
+        var contacts = Store.Conversations.Where(c => c.IsTell && !IsTest(c)).OrderByDescending(c => c.LastActivity).Select(c => c.ContactKey);
+        var members = Store.Conversations.Where(c => !c.IsTell).OrderByDescending(c => c.LastActivity)
+            .SelectMany(c => c.Messages.Where(m => !m.Outgoing).Select(m => $"{m.Sender}@{m.SenderWorld}")).Distinct().Take(100);
+        Portraits.Prefetch(owners.Concat(contacts).Concat(members).Distinct()
+            .Select(key => key.Split('@', 2)).Where(p => p.Length == 2).Select(p => (p[0], p[1])));
         Services.Chat.ChatMessage += OnChatMessage;
         Services.ClientState.Logout += OnLogout;
     }
@@ -61,8 +69,12 @@ public sealed class Messenger : IDisposable
         Services.Chat.ChatMessage -= OnChatMessage;
         Services.ClientState.Logout -= OnLogout;
         Portraits.Dispose();
+        Players.Dispose();
         Store.Flush();
     }
+
+    // Invite, add friend, adventurer plate and so on, for the player menu.
+    public PlayerActions Players { get; } = new();
 
     // UI state shared by the windows.
     public string? ActiveKey { get; set; }
@@ -76,6 +88,9 @@ public sealed class Messenger : IDisposable
     // The fake contact behind Settings → Notifications → Send test tell.
     public const string TestName = "Test Moogle";
     public static bool IsTest(Conversation conversation) => conversation.IsTell && conversation.Name == TestName;
+
+    // Test Moogle and your own notes: messages stay in the messenger.
+    public static bool IsLocalOnly(Conversation conversation) => IsTest(conversation) || conversation.IsSelf;
     public DateTime LastIncoming { get; private set; } = DateTime.MinValue;
     public string? ReplyToLastKey { get; private set; }
 
@@ -100,21 +115,24 @@ public sealed class Messenger : IDisposable
 
     public Conversation? Active => ActiveKey == null ? null : Store.Get(ActiveKey);
 
-    public bool CanSend(Conversation conversation) => conversation.Owner == Owner && !IsTest(conversation);
+    public bool CanSend(Conversation conversation) => conversation.Owner == Owner;
 
     public ContactPrefs? PrefsFor(Conversation conversation) => conversation.IsTell ? Store.PeekPrefs(conversation.ContactKey) : null;
 
     public string DisplayName(Conversation conversation)
     {
         var nickname = PrefsFor(conversation)?.Nickname;
-        return string.IsNullOrWhiteSpace(nickname) ? conversation.Name : nickname;
+        if (!string.IsNullOrWhiteSpace(nickname))
+            return nickname;
+        return conversation.IsSelf ? $"{conversation.Name} (you)" : conversation.Name;
     }
 
     public bool IsMuted(Conversation conversation) => PrefsFor(conversation)?.Muted == true;
 
     // Lodestone face for a thread's avatar (tells only; groups use a glyph).
     public LodestonePortraits.Face? PortraitOf(Conversation conversation) =>
-        conversation.IsTell && !IsTest(conversation) ? Portraits.FaceFor(conversation.Name, conversation.World) : null;
+        IsTest(conversation) ? Portraits.Moogle()
+        : conversation.IsTell ? Portraits.FaceFor(conversation.Name, conversation.World) : null;
 
     // Lodestone face beside a message: yours, the tell partner's, or the
     // group member who wrote it.
@@ -134,6 +152,8 @@ public sealed class Messenger : IDisposable
     {
         if (!conversation.IsTell)
             return 0;
+        if (conversation.IsSelf)
+            return LocalJob;
         if (Friends.Get(conversation.ContactKey) is { Job: > 0 } friend)
             return friend.Job;
         if (seenJobs.TryGetValue(conversation.ContactKey, out var job))
@@ -155,7 +175,7 @@ public sealed class Messenger : IDisposable
         .OrderByDescending(c => c.Pinned)
         .ThenBy(c => c.Pinned ? c.PinOrder : 0)
         .ThenByDescending(c => c.Owner == owner)
-        .ThenByDescending(c => c.LastActivity);
+        .ThenByDescending(c => c.SortRank);
     }
 
     public int UnreadCount(ContactsTab tab) =>
@@ -414,8 +434,13 @@ public sealed class Messenger : IDisposable
         };
         conversation.IsRequest = false;
         conversation.Draft = "";
+        // The test contact and notes to yourself never go to the game, but
+        // get their links filled in just as the game's echo would.
+        if (IsLocalOnly(conversation))
+            SendLocally(message);
         Store.Append(conversation, message);
-        sender.Enqueue(conversation, outgoingText);
+        if (!IsLocalOnly(conversation))
+            sender.Enqueue(conversation, outgoingText);
         if (Config.PlaySendSound)
             Notifier.PlayUiSound(Config.SendSoundEffect);
         return true;
@@ -433,8 +458,11 @@ public sealed class Messenger : IDisposable
         message.PendingSince = DateTime.UtcNow;
         message.EchoedAt = null;
         message.Time = DateTime.UtcNow;
+        if (IsLocalOnly(conversation))
+            SendLocally(message);
         Store.Append(conversation, message);
-        sender.Enqueue(conversation, message.Text);
+        if (!IsLocalOnly(conversation))
+            sender.Enqueue(conversation, message.Text);
     }
 
     public void Discard(Conversation conversation, ChatMessage message)
@@ -490,6 +518,27 @@ public sealed class Messenger : IDisposable
 
     // A pretend incoming tell, for trying out sounds and pop-ups. It goes
     // through the same steps as a real one; the test contact can't be replied to.
+    private static void SendLocally(ChatMessage message)
+    {
+        message.State = SendState.Sent;
+        if (ChatSender.Resolve(message.Text) is not { } resolved)
+            return;
+        message.Text = resolved.TextValue;
+        message.Raw = MessageLinks.RawIfLinked(resolved);
+    }
+
+    // Some test tells carry links, to try those out too.
+    private static SeString TestTell()
+    {
+        return Random.Shared.Next(TestLines.Length + 2) switch
+        {
+            var i when i < TestLines.Length => new SeString(new TextPayload(TestLines[i])),
+            var i when i == TestLines.Length => new SeStringBuilder()
+                .AddText("Look what I found, kupo: ").Append(SeString.CreateItemLink(6653, false)).AddText(" Isn't it cute?").Build(),
+            _ => new SeStringBuilder().AddText("Kupo! Have you read the news? https://na.finalfantasyxiv.com/lodestone/news/").Build(),
+        };
+    }
+
     public void SendTestTell()
     {
         var owner = Owner;
@@ -498,8 +547,9 @@ public sealed class Messenger : IDisposable
         var world = owner.Split('@', 2)[1];
         var conversation = Store.GetOrCreateTell(owner, TestName, world);
         conversation.IsRequest = false;
-        var text = TestLines[Random.Shared.Next(TestLines.Length)];
-        Store.Append(conversation, new ChatMessage { Sender = TestName, SenderWorld = world, Text = text });
+        var tell = TestTell();
+        var text = tell.TextValue;
+        Store.Append(conversation, new ChatMessage { Sender = TestName, SenderWorld = world, Text = text, Raw = MessageLinks.RawIfLinked(tell) });
         if (!IsReading(conversation))
         {
             conversation.Unread++;
@@ -567,6 +617,7 @@ public sealed class Messenger : IDisposable
         var conversation = Store.GetOrCreateTell(owner, name, world);
         conversation.IsRequest = false;
         conversation.LastActivity = DateTime.UtcNow;
+        conversation.Rank = 0;
         return conversation;
     }
 

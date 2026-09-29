@@ -31,7 +31,7 @@ FFXIV only delivers tells to players who are online, not set to Busy, and on you
 Five themes: **Midnight**, **The Void**, **Thanalan**, **Gridania** and **Eorzea**. Separate bubble color presets and sent-text colors are available too. Text uses the game's own font at its built-in sizes (small, medium, large) so it stays sharp, and the window scales from 75% to 150%.
 
 ### Lodestone portraits
-Avatars are each person's Lodestone face picture, in their current gear and headwear, and that includes you. Pictures are looked up by name and home world on the Lodestone once per session and kept in memory only (nothing is saved to disk). Each one is shrunk to the exact size it is drawn at so it stays sharp. Job icons show until a picture arrives, or if someone has no Lodestone profile. You can turn this off under Settings > Appearance.
+Avatars are each person's Lodestone face picture, in their current gear and headwear, and that includes you. Pictures are kept in memory only (never saved to disk). Only the web address of each picture is saved, so next time they load right away without searching the Lodestone; everyone from your history starts loading as soon as the plugin loads, and each is re-checked on the Lodestone once per session in case their look changed. Each one is shrunk to the exact size it is drawn at so it stays sharp. Job icons show until a picture arrives, or if someone has no Lodestone profile. You can turn this off under Settings > Appearance.
 
 ### Notifications
 - An optional pop-up in the top-right corner for each new tell (off by default). Click it to open the chat; it fades after a few seconds. Settings > Notifications has a **Send test tell** button to try it.

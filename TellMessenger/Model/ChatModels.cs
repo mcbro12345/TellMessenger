@@ -72,9 +72,15 @@ public sealed class Conversation
     public bool IsRequest { get; set; }
     public string Draft { get; set; } = "";
     public DateTime LastActivity { get; set; } = DateTime.UtcNow;
+    // Where it sits among unpinned chats when you've dragged it there; 0 means
+    // by its latest activity. New activity resets it, bumping the chat up.
+    public long Rank { get; set; }
+    [JsonIgnore] public long SortRank => Rank != 0 ? Rank : LastActivity.Ticks;
 
     [JsonIgnore] public bool IsTell => Kind == ChannelKind.Tell;
     [JsonIgnore] public string ContactKey => $"{Name}@{World}";
+    // Your own "Yourself" thread: notes that never leave the messenger.
+    [JsonIgnore] public bool IsSelf => IsTell && string.Equals(Owner, ContactKey, StringComparison.OrdinalIgnoreCase);
 
     public static string TellKey(string owner, string name, string world) => $"{owner}|tell|{name}@{world}";
 
@@ -96,4 +102,8 @@ public sealed class HistoryData
     public int Version { get; set; } = 1;
     public Dictionary<string, Conversation> Conversations { get; set; } = [];
     public Dictionary<string, ContactPrefs> Contacts { get; set; } = [];
+
+    // Where each person's Lodestone picture is (a web address, not the
+    // picture), so next session it loads without searching the Lodestone.
+    public Dictionary<string, string> PortraitUrls { get; set; } = [];
 }

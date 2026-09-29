@@ -59,6 +59,8 @@ public sealed unsafe class GameMenuSendTell : IDisposable
 
     private void OnMenuOpened(IMenuOpenedArgs args)
     {
+        if (PluginMenuItems.Asking)
+            return; // our own menus asking other plugins, not the game's menu
         targetName = targetWorld = null;
         if (args.MenuType != ContextMenuType.Default || args.Target is not MenuTargetDefault target)
             return;

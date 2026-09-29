@@ -59,6 +59,7 @@ public sealed class Plugin : IDalamudPlugin
             config.Save();
         }
 
+        MessageLinks.LoadFonts();
         messenger = new Messenger(config);
         settingsWindow = new SettingsWindow(messenger, () => messengerWindow!.ResetPosition());
         messengerWindow = new MessengerWindow(messenger, () => settingsWindow.Toggle());
@@ -108,6 +109,7 @@ public sealed class Plugin : IDalamudPlugin
         windows.RemoveAllWindows();
         messengerWindow.Dispose();
         messenger.Dispose();
+        MessageLinks.DisposeFonts();
         config.Save();
     }
 

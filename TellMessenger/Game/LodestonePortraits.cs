@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.RegularExpressions;
@@ -9,19 +10,24 @@ using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Textures.TextureWraps;
+using TellMessenger.Model;
 
 namespace TellMessenger.Game;
 
-// Character faces from the Lodestone, used as avatars. Each person is looked
-// up once per session by name and home world on the Lodestone's character
-// search. Nothing is written to disk: the picture is kept in memory, shrunk to
-// 128×128, and each size it's drawn at gets its own small texture. Lookups run
-// one at a time in the background.
+// Character faces from the Lodestone, used as avatars. Pictures are only
+// kept in memory, shrunk to 128×128, never written to disk. What is saved is
+// each person's picture address, so next time it loads straight away instead
+// of searching the Lodestone by name and home world first. When the plugin
+// loads, everyone from your history is loaded again in the background, the
+// people you're looking at first. A picture loaded from a saved address is
+// checked against the Lodestone once per session, in case their look changed.
 public sealed class LodestonePortraits : IDisposable
 {
     private const int KeepSize = 128;
+    private const int Workers = 4;
     private static readonly TimeSpan RetryErrorAfter = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan RequestGap = TimeSpan.FromSeconds(2);
+    // Searches are the slow, rate-limited part; pictures come from a CDN.
+    private static readonly TimeSpan SearchGap = TimeSpan.FromMilliseconds(600);
 
     // One search result: the character link, face image, name and home world.
     private static readonly Regex Entry = new(
@@ -30,17 +36,28 @@ public sealed class LodestonePortraits : IDisposable
         RegexOptions.Compiled);
 
     private readonly Configuration config;
+    private readonly HistoryStore store;
     private readonly HttpClient http;
     private readonly CancellationTokenSource stop = new();
     private readonly Dictionary<string, State> states = new();
     private readonly object gate = new();
-    private readonly ConcurrentQueue<(string Name, string World)> queue = new();
+    // Who's on screen first, then everyone from history, then re-checks.
+    private readonly ConcurrentQueue<Job> urgent = new();
+    private readonly ConcurrentQueue<Job> background = new();
+    private readonly ConcurrentQueue<Job> rechecks = new();
+    private readonly ConcurrentDictionary<string, string> urls;
     private readonly SemaphoreSlim wake = new(0);
-    private readonly Task worker;
+    private readonly SemaphoreSlim searchLock = new(1);
+    private DateTime lastSearch = DateTime.MinValue;
+    private readonly Task[] workers;
 
-    public LodestonePortraits(Configuration config, string configDirectory)
+    private sealed record Job(string Name, string World, string Key, bool Recheck = false);
+
+    public LodestonePortraits(Configuration config, HistoryStore store, string configDirectory)
     {
         this.config = config;
+        this.store = store;
+        urls = new ConcurrentDictionary<string, string>(store.PortraitUrls());
         // Older versions saved pictures here.
         try
         {
@@ -55,48 +72,126 @@ public sealed class LodestonePortraits : IDisposable
 
         http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("TellMessenger/0.1 (Dalamud plugin)");
-        worker = Task.Run(RunAsync);
+        workers = Enumerable.Range(0, Workers).Select(_ => Task.Run(RunAsync)).ToArray();
     }
 
     public void Dispose()
     {
         stop.Cancel();
-        wake.Release();
-        try { worker.Wait(TimeSpan.FromSeconds(2)); } catch { /* shutting down */ }
+        wake.Release(Workers);
+        try { Task.WaitAll(workers, TimeSpan.FromSeconds(2)); } catch { /* shutting down */ }
         http.Dispose();
         stop.Dispose();
         ClearFaces();
+        moogle?.Dispose();
     }
 
+    private static string KeyOf(string name, string world) => $"{name}@{world}".ToLowerInvariant();
+
     // This character's face, or null while it's being fetched or if they
-    // have none. Asking queues a lookup the first time.
+    // have none. Asking puts them at the front of the line.
     public Face? FaceFor(string name, string world)
     {
         if (!config.UseLodestonePortraits || name.Length == 0 || world.Length == 0)
             return null;
 
-        var key = $"{name}@{world}".ToLowerInvariant();
+        var key = KeyOf(name, world);
         lock (gate)
         {
             if (!states.TryGetValue(key, out var state))
             {
-                states[key] = new State();
-                queue.Enqueue((name, world));
-                wake.Release();
+                states[key] = state = new State { Urgent = true };
+                Enqueue(urgent, new Job(name, world, key));
                 return null;
             }
             if (state.Face == null && state.FailedAt is { } failed && DateTime.UtcNow - failed > RetryErrorAfter)
             {
                 state.FailedAt = null;
-                queue.Enqueue((name, world));
-                wake.Release();
+                state.Started = false;
+                Enqueue(urgent, new Job(name, world, key));
+            }
+            else if (!state.Started && !state.Urgent)
+            {
+                // Waiting in the background line: move them up.
+                state.Urgent = true;
+                Enqueue(urgent, new Job(name, world, key));
             }
             return state.Face;
         }
     }
 
-    // Looks everyone up again.
-    public void ClearCache() => ClearFaces();
+    // Starts loading these people now, before anyone asks.
+    public void Prefetch(IEnumerable<(string Name, string World)> people)
+    {
+        if (!config.UseLodestonePortraits)
+            return;
+        lock (gate)
+        {
+            foreach (var (name, world) in people)
+            {
+                var key = KeyOf(name, world);
+                if (name.Length == 0 || world.Length == 0 || states.ContainsKey(key))
+                    continue;
+                states[key] = new State();
+                Enqueue(background, new Job(name, world, key));
+            }
+        }
+    }
+
+    private void Enqueue(ConcurrentQueue<Job> queue, Job job)
+    {
+        queue.Enqueue(job);
+        wake.Release();
+    }
+
+    // The test contact's picture: the wind-up moogle minion's icon from the
+    // game files, on a soft lavender background.
+    private const string MoogleIcon = "ui/icon/004000/004472_hr1.tex";
+    private Face? moogle;
+    private bool moogleTried;
+
+    public Face? Moogle()
+    {
+        if (moogleTried)
+            return moogle;
+        moogleTried = true;
+        try
+        {
+            var tex = Services.Data.GetFile<Lumina.Data.Files.TexFile>(MoogleIcon);
+            if (tex == null)
+                return null;
+            int width = tex.Header.Width, height = tex.Header.Height;
+            var size = Math.Min(width, height);
+            var data = tex.ImageData; // BGRA
+            var pixels = new byte[size * size * 4];
+            ReadOnlySpan<byte> background = [0xE8, 0xB8, 0xC9]; // B, G, R
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    var i = (y * width + x) * 4;
+                    var o = (y * size + x) * 4;
+                    var a = data[i + 3] / 255f;
+                    for (var c = 0; c < 3; c++)
+                        pixels[o + c] = (byte)MathF.Round(data[i + c] * a + background[c] * (1 - a));
+                    pixels[o + 3] = 255;
+                }
+            }
+            moogle = new Face(pixels, size, 87); // DXGI_FORMAT_B8G8R8A8_UNORM
+        }
+        catch (Exception e)
+        {
+            Services.Log.Debug(e, "Couldn't load the moogle icon");
+        }
+        return moogle;
+    }
+    // Looks everyone up again, forgetting saved addresses too.
+    public void ClearCache()
+    {
+        ClearFaces();
+        urls.Clear();
+        store.ClearPortraitUrls();
+    }
 
     private void ClearFaces()
     {
@@ -121,60 +216,149 @@ public sealed class LodestonePortraits : IDisposable
                 return;
             }
 
-            while (queue.TryDequeue(out var next) && !stop.IsCancellationRequested)
+            if (!TryNext(out var job))
+                continue;
+            try
             {
-                var key = $"{next.Name}@{next.World}".ToLowerInvariant();
-                try
+                if (job.Recheck)
+                    await RecheckAsync(job);
+                else
+                    await LoadAsync(job);
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception e)
+            {
+                Services.Log.Warning($"Lodestone portrait for {job.Name}@{job.World} failed: {e.Message}");
+                lock (gate)
                 {
-                    var face = await FetchAsync(next.Name, next.World);
-                    lock (gate)
-                    {
-                        if (states.TryGetValue(key, out var state))
-                            state.Face = face;
-                        else
-                            face?.Dispose(); // cleared meanwhile
-                    }
+                    if (!job.Recheck && states.TryGetValue(job.Key, out var state))
+                        state.FailedAt = DateTime.UtcNow;
                 }
-                catch (OperationCanceledException) when (stop.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch (Exception e)
-                {
-                    Services.Log.Warning($"Lodestone lookup for {next.Name}@{next.World} failed: {e.Message}");
-                    lock (gate)
-                    {
-                        if (states.TryGetValue(key, out var state))
-                            state.FailedAt = DateTime.UtcNow;
-                    }
-                }
-
-                try { await Task.Delay(RequestGap, stop.Token); } catch (OperationCanceledException) { return; }
             }
         }
     }
 
-    private async Task<Face?> FetchAsync(string name, string world)
+    private bool TryNext(out Job job)
     {
-        var url = $"https://na.finalfantasyxiv.com/lodestone/character/?q={Uri.EscapeDataString(name)}&worldname={Uri.EscapeDataString(world)}";
-        var html = await http.GetStringAsync(url, stop.Token);
-
-        string? imageUrl = null;
-        foreach (Match match in Entry.Matches(html))
+        while (urgent.TryDequeue(out job!) || background.TryDequeue(out job!) || rechecks.TryDequeue(out job!))
         {
-            var foundName = WebUtility.HtmlDecode(match.Groups[3].Value).Trim();
-            var foundWorld = WebUtility.HtmlDecode(match.Groups[4].Value).Trim();
-            if (foundName.Equals(name, StringComparison.OrdinalIgnoreCase) && foundWorld.Equals(world, StringComparison.OrdinalIgnoreCase))
+            if (job.Recheck)
+                return true;
+            lock (gate)
             {
-                imageUrl = WebUtility.HtmlDecode(match.Groups[2].Value);
-                break;
+                // Skip anyone already done, being fetched, or cleared since.
+                if (!states.TryGetValue(job.Key, out var state) || state.Started)
+                    continue;
+                state.Started = true;
+                return true;
             }
         }
-        if (imageUrl == null)
-            return null;
+        return false;
+    }
 
-        // Decode on the GPU, read the pixels back, and keep a 128×128 copy.
-        var bytes = await http.GetByteArrayAsync(imageUrl, stop.Token);
+    private async Task LoadAsync(Job job)
+    {
+        // A saved address: no search needed. Check it later in the session.
+        if (urls.TryGetValue(job.Key, out var saved))
+        {
+            var fromSaved = await TryLoadImageAsync(saved, job.Name);
+            if (fromSaved != null)
+            {
+                SetFace(job.Key, fromSaved);
+                Enqueue(rechecks, job with { Recheck = true });
+                return;
+            }
+        }
+
+        var url = await SearchAsync(job.Name, job.World);
+        Remember(job.Key, url);
+        SetFace(job.Key, url != null ? await LoadImageAsync(url, job.Name) : null);
+    }
+
+    // Their look may have changed since the address was saved.
+    private async Task RecheckAsync(Job job)
+    {
+        var url = await SearchAsync(job.Name, job.World);
+        if (url == null || urls.TryGetValue(job.Key, out var saved) && saved == url)
+            return;
+        Remember(job.Key, url);
+        SetFace(job.Key, await LoadImageAsync(url, job.Name));
+    }
+
+    private void SetFace(string key, Face? face)
+    {
+        Face? unused;
+        lock (gate)
+        {
+            if (states.TryGetValue(key, out var state))
+            {
+                unused = state.Face;
+                state.Face = face;
+            }
+            else
+            {
+                unused = face; // cleared meanwhile
+            }
+        }
+        // Let go of the one no longer shown on the game's thread, between frames.
+        if (unused != null)
+            Services.Framework.RunOnTick(unused.Dispose);
+    }
+
+    private void Remember(string key, string? url)
+    {
+        if (url != null)
+            urls[key] = url;
+        else
+            urls.TryRemove(key, out _);
+        Services.Framework.RunOnTick(() => store.SetPortraitUrl(key, url));
+    }
+
+    private async Task<string?> SearchAsync(string name, string world)
+    {
+        await searchLock.WaitAsync(stop.Token);
+        try
+        {
+            var wait = lastSearch + SearchGap - DateTime.UtcNow;
+            if (wait > TimeSpan.Zero)
+                await Task.Delay(wait, stop.Token);
+            var url = $"https://na.finalfantasyxiv.com/lodestone/character/?q={Uri.EscapeDataString(name)}&worldname={Uri.EscapeDataString(world)}";
+            var html = await http.GetStringAsync(url, stop.Token);
+            foreach (Match match in Entry.Matches(html))
+            {
+                var foundName = WebUtility.HtmlDecode(match.Groups[3].Value).Trim();
+                var foundWorld = WebUtility.HtmlDecode(match.Groups[4].Value).Trim();
+                if (foundName.Equals(name, StringComparison.OrdinalIgnoreCase) && foundWorld.Equals(world, StringComparison.OrdinalIgnoreCase))
+                    return WebUtility.HtmlDecode(match.Groups[2].Value);
+            }
+            return null;
+        }
+        finally
+        {
+            lastSearch = DateTime.UtcNow;
+            searchLock.Release();
+        }
+    }
+
+    private async Task<Face?> TryLoadImageAsync(string url, string name)
+    {
+        try
+        {
+            return await LoadImageAsync(url, name);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    // Decode on the GPU, read the pixels back, and keep a 128×128 copy.
+    private async Task<Face?> LoadImageAsync(string url, string name)
+    {
+        var bytes = await http.GetByteArrayAsync(url, stop.Token);
         using var full = await Services.Textures.CreateFromImageAsync(bytes, $"TellMessenger portrait {name}", stop.Token);
         var (spec, data) = await Services.TextureReadback.GetRawImageAsync(full, default, true, stop.Token);
         if (spec.BitsPerPixel != 32)
@@ -188,6 +372,8 @@ public sealed class LodestonePortraits : IDisposable
     {
         public Face? Face;
         public DateTime? FailedAt;
+        public bool Started;
+        public bool Urgent;
     }
 
     // One person's picture: the kept pixels, plus a texture for each size it

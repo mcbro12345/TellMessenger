@@ -99,7 +99,7 @@ public sealed class ToastWindow : Window
         // Avatar: portrait, job icon, or a glyph.
         var avatarMin = min + new Vector2(pad, (size.Y - avatarSize) / 2);
         if (conversation != null)
-            Gfx.Avatar(list, avatarMin, avatarSize, messenger.JobOf(conversation), conversation.Kind, messenger.PortraitOf(conversation));
+            Gfx.Avatar(list, avatarMin, avatarSize, messenger.JobOf(conversation), conversation.Kind, messenger.PortraitOf(conversation), alpha);
 
         var textX = avatarMin.X + avatarSize + 10 * scale;
         var textRight = closeCenter.X - closeRadius - 6 * scale;

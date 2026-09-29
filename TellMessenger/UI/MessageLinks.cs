@@ -6,6 +6,8 @@ using System.Text.RegularExpressions;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
+using Dalamud.Interface.GameFonts;
+using Dalamud.Interface.ManagedFontAtlas;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
@@ -363,17 +365,39 @@ public static partial class MessageLinks
         ImGui.TextUnformatted(item.Description.ExtractText());
     }
 
-    // A 32px icon with the name beside it, as Chat 2 lays it out.
+    // The name in the game's heading font, bigger than the text under it,
+    // like the game's own item tooltips.
+    private static IFontHandle? nameFont;
+
+    // Made up front with the plugin's other fonts: adding a font later makes
+    // Dalamud rebuild them all, which briefly leaves them unusable.
+    public static void LoadFonts() =>
+        nameFont ??= Services.PluginInterface.UiBuilder.FontAtlas.NewGameFontHandle(new GameFontStyle(GameFontFamilyAndSize.TrumpGothic23));
+
+    public static void DisposeFonts()
+    {
+        nameFont?.Dispose();
+        nameFont = null;
+    }
+
+    // An icon with the name beside it, as Chat 2 lays it out.
     private static void IconAndName(uint iconId, bool hq, string name)
     {
+        LoadFonts();
+        using var font = nameFont is { Available: true } ? nameFont.Push() : null;
+        var nameHeight = ImGui.GetTextLineHeight();
         if (Services.Textures.GetFromGameIcon(new GameIconLookup(iconId, hq)).GetWrapOrDefault() is { } icon)
         {
             var cursor = ImGui.GetCursorPos();
             var ratio = icon.Size.X / icon.Size.Y;
-            var size = ImGuiHelpers.ScaledVector2(MathF.Min(32, 32 * ratio), MathF.Min(32, 32 / ratio));
+            var size = ImGuiHelpers.ScaledVector2(MathF.Min(40, 40 * ratio), MathF.Min(40, 40 / ratio));
             ImGui.Image(icon.Handle, size);
             ImGui.SameLine();
-            ImGui.SetCursorPos(cursor + new Vector2(size.X + 4, size.Y - ImGui.GetTextLineHeightWithSpacing()));
+            ImGui.SetCursorPos(cursor + new Vector2(size.X + ImGuiHelpers.GlobalScale * 8, (size.Y - nameHeight) / 2));
+            ImGui.TextUnformatted(name);
+            ImGui.SetCursorPos(cursor + new Vector2(0, size.Y + ImGui.GetStyle().ItemSpacing.Y));
+            ImGui.Dummy(Vector2.Zero);
+            return;
         }
         ImGui.TextUnformatted(name);
     }

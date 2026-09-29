@@ -169,11 +169,15 @@ public sealed class ToggleWidget : Window
         }
     }
 
+    private static float AvatarSize(float height, float scale) => MathF.Round(height - 12 * scale);
+
     private static Vector2 PreviewSize(IncomingPreview preview, float scale)
     {
         var name = ImGui.CalcTextSize(preview.Sender);
         var text = ImGui.CalcTextSize(Messenger.Snippet(preview.Text, 48));
-        return new Vector2(MathF.Max(name.X, text.X) + 24 * scale, name.Y + text.Y + 16 * scale);
+        var height = name.Y + text.Y + 16 * scale;
+        // Room for their picture on the left.
+        return new Vector2(MathF.Max(name.X, text.X) + 24 * scale + AvatarSize(height, scale) + 10 * scale, height);
     }
 
     // `live` is false while it fades out, when it no longer takes clicks.
@@ -194,8 +198,13 @@ public sealed class ToggleWidget : Window
         list.AddRectFilled(min, min + size, Theme.U32(Theme.Fade(p.Surface with { W = 0.96f }, alpha)), 10 * scale);
         list.AddRect(min, min + size, Theme.U32(Theme.Fade(p.Accent with { W = 0.4f }, alpha)), 10 * scale);
         var lineHeight = ImGui.GetTextLineHeight();
-        Gfx.Text(list, min + new Vector2(12 * scale, 8 * scale), Theme.U32(Theme.Fade(p.Accent, alpha)), preview.Sender);
-        Gfx.Text(list, min + new Vector2(12 * scale, 8 * scale + lineHeight), Theme.U32(Theme.Fade(p.Text, alpha)), Messenger.Snippet(preview.Text, 48));
+        var avatarSize = AvatarSize(size.Y, scale);
+        var avatarMin = min + new Vector2(8 * scale, (size.Y - avatarSize) / 2);
+        if (messenger.Store.Get(preview.ConversationKey) is { } conversation)
+            Gfx.Avatar(list, avatarMin, avatarSize, messenger.JobOf(conversation), conversation.Kind, messenger.PortraitOf(conversation), alpha);
+        var textX = avatarMin.X + avatarSize + 10 * scale;
+        Gfx.Text(list, new Vector2(textX, min.Y + 8 * scale), Theme.U32(Theme.Fade(p.Accent, alpha)), preview.Sender);
+        Gfx.Text(list, new Vector2(textX, min.Y + 8 * scale + lineHeight), Theme.U32(Theme.Fade(p.Text, alpha)), Messenger.Snippet(preview.Text, 48));
         if (live && ImGui.IsItemHovered())
             ImGui.SetTooltip("Click to open, right-click to dismiss");
     }

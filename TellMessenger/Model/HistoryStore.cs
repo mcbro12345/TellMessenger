@@ -77,10 +77,28 @@ public sealed class HistoryStore
 
     public ContactPrefs? PeekPrefs(string contactKey) => data.Contacts.GetValueOrDefault(contactKey);
 
+    public Dictionary<string, string> PortraitUrls() => new(data.PortraitUrls);
+
+    public void ClearPortraitUrls()
+    {
+        data.PortraitUrls.Clear();
+        MarkDirty();
+    }
+
+    public void SetPortraitUrl(string key, string? url)
+    {
+        if (url == null ? !data.PortraitUrls.Remove(key) : data.PortraitUrls.GetValueOrDefault(key) == url)
+            return;
+        if (url != null)
+            data.PortraitUrls[key] = url;
+        MarkDirty();
+    }
+
     public void Append(Conversation conversation, ChatMessage message)
     {
         conversation.Messages.Add(message);
         conversation.LastActivity = message.Time;
+        conversation.Rank = 0;
         var excess = conversation.Messages.Count - Math.Max(1, config.MaxMessagesPerContact);
         if (excess > 0)
             conversation.Messages.RemoveRange(0, excess);
@@ -178,6 +196,8 @@ public sealed class HistoryStore
         var changed = false;
         foreach (var conversation in data.Conversations.Values.ToList())
         {
+            if (conversation.IsSelf)
+                continue; // notes to yourself are kept
             var removed = conversation.Messages.RemoveAll(m => m.Time < cutoff);
             changed |= removed > 0;
             if (conversation.Messages.Count == 0 && !conversation.Pinned && conversation.LastActivity < cutoff)
@@ -192,7 +212,7 @@ public sealed class HistoryStore
 
     private void EnforceContactLimit()
     {
-        var tells = data.Conversations.Values.Where(c => c.IsTell).ToList();
+        var tells = data.Conversations.Values.Where(c => c.IsTell && !c.IsSelf).ToList();
         var excess = tells.Count - Math.Max(1, config.MaxContacts);
         if (excess <= 0)
             return;

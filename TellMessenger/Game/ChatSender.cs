@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using FFXIVClientStructs.FFXIV.Client.System.String;
+using Dalamud.Game.Text.SeStringHandling;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using TellMessenger.Model;
 
 namespace TellMessenger.Game;
@@ -54,10 +56,31 @@ public sealed class ChatSender
         if (queue.Count == 0 || DateTime.UtcNow - lastSend < Gap)
             return;
         lastSend = DateTime.UtcNow;
-        Send(queue.Dequeue());
+        Run(queue.Dequeue());
     }
 
-    private static unsafe void Send(string command)
+    // The message as the game would send it, with <item>, <flag>, <pos>, <t>
+    // and the other placeholders turned into links, without sending anything.
+    public static unsafe SeString? Resolve(string text)
+    {
+        var pronouns = PronounModule.Instance();
+        if (pronouns == null)
+            return null;
+        var input = Utf8String.FromString(text);
+        try
+        {
+            input->Copy(pronouns->ProcessString(input, true, MaxMessageBytes));
+            var output = pronouns->ProcessString(input, false, MaxMessageBytes);
+            return output == null ? null : SeString.Parse(output->AsSpan().ToArray());
+        }
+        finally
+        {
+            input->Dtor(true);
+        }
+    }
+
+    // Runs a chat line or text command as if typed into the chat box.
+    public static unsafe void Run(string command)
     {
         var ui = UIModule.Instance();
         if (ui == null)

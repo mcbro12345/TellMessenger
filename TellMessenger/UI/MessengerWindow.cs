@@ -132,18 +132,37 @@ public sealed partial class MessengerWindow : Window, IDisposable
         Gfx.Scale = config.WindowScale * ImGuiHelpers.GlobalScale;
         EnsureFont();
 
-        var opacity = IsFocused ? config.OpacityActive : config.OpacityInactive;
-        pushedTheme = Theme.Push(opacity);
-        pushedFont = font?.Push();
-        if (smallFont is { Available: true })
+        // If anything here fails, undo what was pushed: Dalamud doesn't call
+        // PostDraw then, and leftover colors would restyle every other window.
+        try
         {
-            smallLock = smallFont.Lock();
-            Gfx.SetSmallFont(smallLock.ImFont);
+            var opacity = IsFocused ? config.OpacityActive : config.OpacityInactive;
+            pushedTheme = Theme.Push(opacity);
+            pushedFont = font?.Push();
+            if (smallFont is { Available: true })
+            {
+                // The atlas can be mid-rebuild even when the handle says it's
+                // ready; skip the small font for that frame instead of failing.
+                try
+                {
+                    smallLock = smallFont.Lock();
+                    Gfx.SetSmallFont(smallLock.ImFont);
+                }
+                catch (InvalidOperationException)
+                {
+                    smallLock = null;
+                }
+            }
+            var dim = config.DimWhenMoving && !IsFocused && DateTime.UtcNow - lastMoved < TimeSpan.FromMilliseconds(400);
+            pushedAlpha = ImRaii.PushStyle(ImGuiStyleVar.Alpha, dim ? 0.35f : 1f)
+                .Push(ImGuiStyleVar.WindowPadding, Vector2.Zero)
+                .Push(ImGuiStyleVar.ItemSpacing, Vector2.Zero);
         }
-        var dim = config.DimWhenMoving && !IsFocused && DateTime.UtcNow - lastMoved < TimeSpan.FromMilliseconds(400);
-        pushedAlpha = ImRaii.PushStyle(ImGuiStyleVar.Alpha, dim ? 0.35f : 1f)
-            .Push(ImGuiStyleVar.WindowPadding, Vector2.Zero)
-            .Push(ImGuiStyleVar.ItemSpacing, Vector2.Zero);
+        catch
+        {
+            PostDraw();
+            throw;
+        }
     }
 
     public override void PostDraw()
@@ -214,6 +233,9 @@ public sealed partial class MessengerWindow : Window, IDisposable
                 DrawConversation();
         }
 
+        DrawPlayerMenu();
+        DrawItemMenu();
+        DrawPluginSubmenu();
         DrawPopups();
         DrawBorder();
     }
@@ -235,14 +257,14 @@ public sealed partial class MessengerWindow : Window, IDisposable
         ImGui.SameLine(0, Gfx.S(2));
         if (Gfx.IconButton("##readall", FontAwesomeIcon.CheckDouble, "Mark all as read"))
             messenger.MarkAllRead();
-        ImGui.SameLine(0, Gfx.S(2));
-        if (Gfx.IconButton("##settings", FontAwesomeIcon.Cog, "Settings"))
-            openSettings();
 
         const string title = "Tell Messenger";
         var titleSize = ImGui.CalcTextSize(title);
         Gfx.Text(list, min + new Vector2((width - titleSize.X) / 2, (height - titleSize.Y) / 2), Theme.U32(Theme.Current.TextEmphasis), title);
 
+        ImGui.SetCursorScreenPos(min + new Vector2(width - Gfx.S(60), buttonY));
+        if (Gfx.IconButton("##settings", FontAwesomeIcon.Cog, "Settings"))
+            openSettings();
         ImGui.SetCursorScreenPos(min + new Vector2(width - Gfx.S(32), buttonY));
         if (Gfx.IconButton("##close", FontAwesomeIcon.Times, "Close"))
             IsOpen = false;
@@ -325,6 +347,26 @@ public sealed partial class MessengerWindow : Window, IDisposable
         {
             if (list)
             {
+                // Yourself first, for notes.
+                var self = owner?.Split('@', 2);
+                var search = newChatText.Split('@')[0].Trim();
+                if (self is { Length: 2 } && (search.Length == 0
+                        || "yourself".Contains(search, StringComparison.OrdinalIgnoreCase)
+                        || self[0].Contains(search, StringComparison.OrdinalIgnoreCase)))
+                {
+                    using (ImRaii.PushColor(ImGuiCol.Text, Theme.Current.Accent))
+                        ImGui.TextUnformatted("●");
+                    ImGui.SameLine(0, Gfx.S(6));
+                    if (ImGui.Selectable("Yourself  ", false))
+                    {
+                        name = self[0];
+                        targetWorld = self[1];
+                        submit = true;
+                    }
+                    ImGui.SameLine();
+                    ImGui.TextDisabled("notes");
+                }
+
                 foreach (var friend in messenger.Friends.All
                              .Where(f => newChatText.Length == 0 || f.Name.Contains(newChatText.Split('@')[0], StringComparison.OrdinalIgnoreCase))
                              .OrderByDescending(f => f.Presence != Game.Presence.Offline).ThenBy(f => f.Name).Take(50))

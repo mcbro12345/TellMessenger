@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -68,8 +69,146 @@ public sealed partial class MessengerWindow
             return;
         }
 
-        foreach (var conversation in rows)
+        DrawRowsAnimated(rows);
+    }
+
+    // Rows glide to where they belong instead of jumping: after a drop, and
+    // when a new message moves a chat up. While dragging, the held row follows
+    // the mouse and the others slide apart to show where it will land.
+    // Pinned rows move among the pinned ones and unpinned rows among the
+    // rest. A dragged chat keeps its new place until a new message bumps it
+    // to the top of the unpinned ones.
+    private string? dragKey;
+    private float dragGrab;
+    private readonly Dictionary<string, float> rowY = new();
+    private (ContactsTab, string) rowsFor;
+
+    private void DrawRowsAnimated(List<Conversation> rows)
+    {
+        var height = Gfx.S(58);
+        var top = ImGui.GetCursorScreenPos();
+        var width = ImGui.GetContentRegionAvail().X;
+        var step = 1f - MathF.Exp(-ImGui.GetIO().DeltaTime * 18f);
+
+        // A different list: start everything in place.
+        if (rowsFor != (messenger.Tab, search))
+        {
+            rowsFor = (messenger.Tab, search);
+            rowY.Clear();
+        }
+
+        var dragged = dragKey != null ? rows.FindIndex(c => c.Key == dragKey) : -1;
+        if (dragKey != null && (dragged < 0 || search.Length > 0))
+        {
+            dragKey = null;
+            dragged = -1;
+        }
+
+        // Where each row should be, and where the held row would land.
+        var targets = new Dictionary<string, float>();
+        var others = rows.Where((_, i) => i != dragged).ToList();
+        var floatY = 0f;
+        var pinHere = false;
+        var slot = dragged;
+        var pinnedOthers = others.Count(c => c.Pinned);
+        if (dragged >= 0)
+        {
+            var conversation = rows[dragged];
+            // Pinned rows stay among the pinned ones, and the rest stay below them.
+            var (low, high) = conversation.Pinned ? (0, pinnedOthers) : (pinnedOthers, rows.Count - 1);
+            floatY = Math.Clamp(ImGui.GetMousePos().Y - top.Y - dragGrab, low * height, high * height);
+            var center = floatY + height / 2;
+            var index = others.Select((_, j) => (j + 0.5f) * height).Count(c => c < center);
+            pinHere = conversation.Pinned;
+            slot = pinHere ? Math.Min(index, pinnedOthers) : Math.Max(index, pinnedOthers);
+            for (var j = 0; j < others.Count; j++)
+                targets[others[j].Key] = (j < slot ? j : j + 1) * height;
+        }
+        else
+        {
+            for (var i = 0; i < rows.Count; i++)
+                targets[rows[i].Key] = i * height;
+        }
+
+        // The gap where the held row will land.
+        var list = ImGui.GetWindowDrawList();
+        if (dragged >= 0)
+        {
+            var gapMin = top + new Vector2(Gfx.S(4), slot * height + Gfx.S(3));
+            list.AddRectFilled(gapMin, gapMin + new Vector2(width - Gfx.S(8), height - Gfx.S(6)),
+                Theme.U32(Theme.Current.Accent with { W = 0.08f }), Gfx.S(8));
+        }
+
+        foreach (var conversation in others)
+        {
+            var target = targets[conversation.Key];
+            var y = rowY.TryGetValue(conversation.Key, out var current) ? current + (target - current) * step : target;
+            if (MathF.Abs(y - target) < 0.5f)
+                y = target;
+            rowY[conversation.Key] = y;
+            ImGui.SetCursorScreenPos(top + new Vector2(0, y));
             DrawContactRow(conversation);
+        }
+
+        // The held row, lifted above the rest.
+        if (dragged >= 0)
+        {
+            var conversation = rows[dragged];
+            rowY[conversation.Key] = floatY;
+            ImGui.SetCursorScreenPos(top + new Vector2(0, floatY));
+            DrawContactRow(conversation, true);
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeNs);
+            ScrollNearEdges();
+            if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
+                Drop(conversation, others, pinnedOthers, pinHere, slot);
+        }
+
+        ImGui.SetCursorScreenPos(top + new Vector2(0, rows.Count * height));
+        ImGui.Dummy(new Vector2(width, 0));
+    }
+
+    private void Drop(Conversation conversation, List<Conversation> others, int pinnedOthers, bool pinHere, int slot)
+    {
+        dragKey = null;
+        if (pinHere)
+        {
+            var pinned = others.Take(pinnedOthers).ToList();
+            pinned.Insert(slot, conversation);
+            conversation.Pinned = true;
+            for (var i = 0; i < pinned.Count; i++)
+                pinned[i].PinOrder = i + 1;
+            messenger.Store.MarkDirty();
+        }
+        else
+        {
+            // Between its new neighbours; a new message still bumps it up.
+            var unpinned = others.Skip(pinnedOthers).ToList();
+            var k = slot - pinnedOthers;
+            long? above = k > 0 ? unpinned[k - 1].SortRank : null;
+            long? below = k < unpinned.Count ? unpinned[k].SortRank : null;
+            conversation.Rank = (above, below) switch
+            {
+                ({ } a, { } b) => a / 2 + b / 2,
+                (null, { } b) => b + TimeSpan.TicksPerSecond,
+                ({ } a, null) => a - TimeSpan.TicksPerSecond,
+                _ => conversation.Rank,
+            };
+            messenger.Store.MarkDirty();
+        }
+    }
+
+    // Scroll when held near the top or bottom of the list.
+    private static void ScrollNearEdges()
+    {
+        var mouseY = ImGui.GetMousePos().Y;
+        var top = ImGui.GetWindowPos().Y;
+        var bottom = top + ImGui.GetWindowHeight();
+        var edge = Gfx.S(24);
+        var speed = Gfx.S(600) * ImGui.GetIO().DeltaTime;
+        if (mouseY < top + edge)
+            ImGui.SetScrollY(ImGui.GetScrollY() - speed);
+        else if (mouseY > bottom - edge)
+            ImGui.SetScrollY(ImGui.GetScrollY() + speed);
     }
 
     private static void CenteredDisabled(string text)
@@ -90,7 +229,7 @@ public sealed partial class MessengerWindow
                || conversation.Messages.Any(m => m.Text.Contains(search, StringComparison.OrdinalIgnoreCase));
     }
 
-    private void DrawContactRow(Conversation conversation)
+    private void DrawContactRow(Conversation conversation, bool lifted = false)
     {
         using var id = ImRaii.PushId(conversation.Key);
         var p = Theme.Current;
@@ -101,13 +240,27 @@ public sealed partial class MessengerWindow
         var list = ImGui.GetWindowDrawList();
 
         var clicked = ImGui.InvisibleButton("##row", new Vector2(width, height));
-        var hovered = ImGui.IsItemHovered();
+        var hovered = ImGui.IsItemHovered() && dragKey == null;
         if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
         {
             menuContactKey = conversation.Key;
+            GatherPluginItemsFor(conversation);
             openContactMenu = true;
         }
-        if (clicked)
+        if (dragKey == null && search.Length == 0 && ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left, Gfx.S(6)))
+        {
+            dragKey = conversation.Key;
+            dragGrab = ImGui.GetIO().MouseClickedPos[0].Y - min.Y;
+        }
+
+        // Being dragged: a card with a shadow, above the other rows.
+        if (lifted)
+        {
+            list.AddRectFilled(min + Gfx.S(0, 4), max + Gfx.S(0, 4), Theme.U32(new Vector4(0, 0, 0, 0.35f)), Gfx.S(8));
+            list.AddRectFilled(min, max, Theme.U32(p.Surface with { W = 1 }), Gfx.S(8));
+            list.AddRect(min, max, Theme.U32(p.Accent with { W = 0.6f }), Gfx.S(8), ImDrawFlags.None, Gfx.S(1.5f));
+        }
+        if (clicked && dragKey == null)
             Select(conversation.Key);
 
         var selected = messenger.ActiveKey == conversation.Key;
@@ -181,6 +334,8 @@ public sealed partial class MessengerWindow
         string where;
         if (!conversation.IsTell)
             where = conversation.Owner.Split('@')[0];
+        else if (conversation.IsSelf)
+            where = "Notes to yourself";
         else if (conversation.IsRequest)
             where = "Not a friend or party member";
         else if (friend is { Presence: not Presence.Offline } && friend.Location.Length > 0)
@@ -268,6 +423,16 @@ public sealed partial class MessengerWindow
     {
         ImGui.TextDisabled(messenger.DisplayName(conversation));
         ImGui.Separator();
+
+        // The player options Chat 2 has, then the conversation's own.
+        if (conversation.IsTell && !Messenger.IsLocalOnly(conversation))
+        {
+            var before = ImGui.GetCursorPosY();
+            DrawPlayerItems(conversation.Name, conversation.World);
+            DrawPluginItems(pluginItems, ImGui.GetCursorPosY() > before);
+            if (ImGui.GetCursorPosY() > before)
+                ImGui.Separator();
+        }
 
         if (ImGui.MenuItem(conversation.Pinned ? "Unpin" : "Pin to top"))
         {
