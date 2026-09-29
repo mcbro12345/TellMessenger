@@ -6,14 +6,12 @@
 
 ### Messenger-style conversations
 - Each person gets their own thread with chat bubbles, timestamps, date separators and a "New messages" line.
-- Right-click a message to **reply** (quotes it above your message) or **copy** it.
-- **Links work** like in Chat 2: map flags open the map, items and statuses show a tooltip, quests and Party Finder listings open their windows, player names start a chat, web addresses open in your browser, and links other plugins add (like "Teleport to…") run that plugin.
+- **Links work**
 - **Drafts** stay with each chat, even after a restart.
-- A small receipt line under your messages, like a phone messenger: **Sending…**, then **Sent** under your latest message. If a tell fails, the game's error shows there instead (not in the game's chat), with **Retry** and **Discard**.
 - An emoticon picker shows text faces and symbols the game's font can display.
 
 ### Contact list
-- Online status dots, job icons, unread badges, last-message previews, and where a friend is (zone or duty).
+- Online status dots, job icons, last-message previews
 - Pin contacts and reorder pinned ones. Search across names, nicknames, notes and message history.
 - Right-click a contact to **mute** them, set a **nickname**, and add a private **note**.
 
@@ -35,7 +33,6 @@ Avatars are each person's Lodestone face picture, in their current gear and head
 - A pop-up in the top-right corner for each new tell. Click it to open the chat; it fades after a few seconds. Settings > Notifications has a **Send test tell** button to try it.
 - Choose any of the game's `<se.1>` to `<se.16>` sounds.
 - Optional taskbar flash when you're tabbed out.
-- A small interface click when you send (can be turned off).
 - A floating button shows an unread badge and a preview of the newest message. The server info bar entry (the game's boxed T icon with a boxed unread count) does the same job if you prefer it.
 
 ### Auto-open
