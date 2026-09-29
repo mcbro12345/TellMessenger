@@ -192,7 +192,6 @@ public sealed partial class MessengerWindow : Window, IDisposable
     public override void Draw()
     {
         RememberPlacement();
-        HandleEscape();
         DrawTitleBar();
 
         var body = ImGui.GetContentRegionAvail();
@@ -217,23 +216,6 @@ public sealed partial class MessengerWindow : Window, IDisposable
 
         DrawPopups();
         DrawBorder();
-    }
-
-    private void HandleEscape()
-    {
-        if (!ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows) || !ImGui.IsKeyPressed(ImGuiKey.Escape, false))
-            return;
-        if (ImGui.IsPopupOpen("", ImGuiPopupFlags.AnyPopupId))
-            return;
-
-        var active = messenger.Active;
-        if (config.DoubleEscToClose && active != null && (active.Draft.Length > 0 || replyTo != null))
-        {
-            active.Draft = "";
-            replyTo = null;
-            return;
-        }
-        IsOpen = false;
     }
 
     private void DrawTitleBar()

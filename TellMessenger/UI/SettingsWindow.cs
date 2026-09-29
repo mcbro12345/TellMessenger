@@ -184,8 +184,6 @@ public sealed class SettingsWindow : Window
             "Makes the window see-through while your character moves, unless you're typing in it.");
         Toggle("Auto-focus chat input", config.AutoFocusInput, v => config.AutoFocusInput = v,
             "Puts the cursor in the message box when you open a conversation.");
-        Toggle("Double Esc to close", config.DoubleEscToClose, v => config.DoubleEscToClose = v,
-            "The first Esc clears the message box; the second closes the window.");
 
         Section("Tells");
         Toggle("Hide tells from the game's chat", config.HideTellsFromChat, v => config.HideTellsFromChat = v,

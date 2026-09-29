@@ -42,16 +42,15 @@ public sealed class Configuration : IPluginConfiguration
     public float WindowScale { get; set; } = 1f;
     public float OpacityActive { get; set; } = 1f;
     public float OpacityInactive { get; set; } = 0.9f;
-    public float ContactsWidth { get; set; } = 260f;
+    public float ContactsWidth { get; set; } = 192f;
 
     // Behavior
     public bool DimWhenMoving { get; set; }
     public bool AutoFocusInput { get; set; } = true;
     public bool HideTellsFromChat { get; set; }
-    public bool AutoOpenIncoming { get; set; } = true;
+    public bool AutoOpenIncoming { get; set; }
     public bool AutoOpenOutgoing { get; set; } = true;
     public bool HideOnCombat { get; set; }
-    public bool DoubleEscToClose { get; set; } = true;
     public bool ShowGroupChats { get; set; } = true;
     public bool GroupParty { get; set; }
     public bool GroupAlliance { get; set; }
@@ -69,23 +68,23 @@ public sealed class Configuration : IPluginConfiguration
 
     // Notifications
     public bool PlaySound { get; set; } = true;
-    public int SoundEffect { get; set; } = 2; // <se.2>
+    public int SoundEffect { get; set; } = 5; // <se.5>
     public bool FlashTaskbar { get; set; } = true;
     public bool PlaySendSound { get; set; } = true;
-    public int SendSoundEffect { get; set; } = 1; // game UI sound id; 1 is the menu click
+    public int SendSoundEffect { get; set; } = 6; // game UI sound id
     public bool MentionAlerts { get; set; } = true;
 
     // Icons
     public IconMode IconMode { get; set; } = IconMode.Widget;
-    public float IconSize { get; set; } = 42f;
+    public float IconSize { get; set; } = 40f;
     public bool LockIcon { get; set; }
-    public bool DesaturateIdle { get; set; }
-    public float WidgetIdleOpacity { get; set; } = 0.9f;
+    public bool DesaturateIdle { get; set; } = true;
+    public float WidgetIdleOpacity { get; set; } = 0.8f;
     public bool ShowBadge { get; set; } = true;
     public bool BadgePulse { get; set; } = true;
     public bool ShowWidgetPreview { get; set; } = true;
     public int PreviewDismissSeconds { get; set; } = 8; // 0 keeps it until read
-    public bool ShowToasts { get; set; } = true;
+    public bool ShowToasts { get; set; }
     public int ToastSeconds { get; set; } = 6; // 0 keeps them until clicked
     public PreviewSide PreviewSide { get; set; } = PreviewSide.Right;
     public Vector2 WidgetPosition { get; set; } = new(120, 420);

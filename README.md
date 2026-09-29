@@ -30,13 +30,13 @@ Five themes: **Midnight**, **The Void**, **Thanalan**, **Gridania** and **Eorzea
 Avatars are each person's Lodestone face picture, in their current gear and headwear, and that includes you. Pictures are looked up by name and home world on the Lodestone once per session and kept in memory only (nothing is saved to disk). Each one is shrunk to the exact size it is drawn at so it stays sharp. Job icons show until a picture arrives, or if someone has no Lodestone profile. You can turn this off under Settings > Appearance.
 
 ### Notifications
-- A pop-up in the top-right corner for each new tell. Click it to open the chat; it fades after a few seconds. Settings > Notifications has a **Send test tell** button to try it.
+- An optional pop-up in the top-right corner for each new tell (off by default). Click it to open the chat; it fades after a few seconds. Settings > Notifications has a **Send test tell** button to try it.
 - Choose any of the game's `<se.1>` to `<se.16>` sounds.
 - Optional taskbar flash when you're tabbed out.
 - A floating button shows an unread badge and a preview of the newest message. The server info bar entry (the game's boxed T icon with a boxed unread count) does the same job if you prefer it.
 
 ### Auto-open
-The game's own **Send Tell** (on a player's right-click menu, the friend and party lists, and Chat 2's name menu) opens the conversation in the messenger instead of the game's chat box. The messenger also opens when you get a tell or send one from the game's chat box, but never on its own during combat.
+The game's own **Send Tell** (on a player's right-click menu, the friend and party lists, and Chat 2's name menu) opens the conversation in the messenger instead of the game's chat box. The messenger also opens when you send a tell from the game's chat box, and optionally when you get one, but never on its own during combat.
 
 ### Linking
 Messages go through the game's own chat box, so FFXIV's placeholders work: use **Link** on an item and type `<item>`, or use `<flag>`, `<pos>`, `<t>` and the rest.
