@@ -1,0 +1,16 @@
+{
+  "Author": "mcbro",
+  "Name": "Tell Messenger",
+  "InternalName": "TellMessenger",
+  "AssemblyVersion": "0.1.0.0",
+  "Description": "Puts every tell in one messenger window. Each person gets their own conversation with saved history, unread badges, online status and location, replies and drafts. Linkshell chat (and optionally party, alliance and Free Company chat) goes in a Linkshells tab, and tells from strangers can wait in a Requests tab. Based on the WoW addon WhisperMessenger.",
+  "ApplicableVersion": "any",
+  "Tags": ["chat", "tell", "whisper", "messenger", "social"],
+  "DalamudApiLevel": 15,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": false,
+  "LoadPriority": 0,
+  "Punchline": "Never lose a tell again",
+  "IconUrl": "https://raw.githubusercontent.com/mcbro12345/TellMessenger/main/images/icon.png"
+}

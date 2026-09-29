@@ -1,0 +1,26 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <AssemblyName>TellMessenger</AssemblyName>
+    <Version>0.1.0.0</Version>
+    <LangVersion>preview</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="TellMessenger.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../AI-GENERATED-NOTICE.md" Link="AI-GENERATED-NOTICE.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Dalamud shows images/icon.png next to the DLL as the icon of a dev plugin. -->
+    <Content Include="../images/icon.png" Link="images/icon.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- The packager only zips top-level files, but Dalamud reads a dev
+       plugin's icon from images/icon.png beside the DLL, so the icon is
+       added to the zip afterwards. -->
+  <Target Name="AddIconToPackage" AfterTargets="DefaultDalamudPackagerRelease">
+    <Exec Command="powershell -NoProfile -NonInteractive -Command &quot;Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip = [IO.Compression.ZipFile]::Open('$(OutDir)$(AssemblyName)\latest.zip', 'Update'); try { $old = $zip.GetEntry('images/icon.png'); if ($old) { $old.Delete() }; [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, '$(OutDir)images\icon.png', 'images/icon.png') } finally { $zip.Dispose() }&quot;" />
+  </Target>
+</Project>

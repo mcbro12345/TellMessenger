@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible Tell Messenger problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve Tell Messenger. Please avoid posting private account information in diagnostics.
+  - type: input
+    id: version
+    attributes:
+      label: Tell Messenger version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: What did you do before the problem appeared?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics or logs
+      description: Paste relevant Dalamud log output (/xllog) if useful and safe to share.
+      render: text
